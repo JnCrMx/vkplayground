@@ -80,15 +80,30 @@ namespace app
 		ImGui_ImplVulkan_Init(&init_info, renderPass.get());
 
 		vk::UniqueCommandBuffer cmd = std::move(device.allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo(pool.get(), vk::CommandBufferLevel::ePrimary, 1)).front());
+		cmd->begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
 		ImGui_ImplVulkan_CreateFontsTexture(cmd.get());
+		cmd->end();
 
 		vk::SubmitInfo submit_info({}, {}, cmd.get(), {});
 		graphicsQueue.submit(submit_info);
 		graphicsQueue.waitIdle();
+
+		ImGui_ImplVulkan_DestroyFontUploadObjects();
+	}
+
+	void main_phase::render_imgui()
+	{
+		ImGui::ShowDemoWindow();
 	}
 
 	void main_phase::render(int frame, vk::Semaphore imageAvailable, vk::Semaphore renderFinished, vk::Fence fence)
 	{
+		ImGui_ImplVulkan_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+		render_imgui();
+		ImGui::Render();
+
 		auto time = std::chrono::high_resolution_clock::now().time_since_epoch();
 		auto seconds = std::chrono::duration_cast<std::chrono::seconds>(time);
 		auto partialSeconds = std::chrono::duration<float>(time-seconds);
@@ -97,9 +112,12 @@ namespace app
 
 		commandBuffer->begin(vk::CommandBufferBeginInfo());
 
-		vk::ClearValue color(std::array<float, 4>{partialSeconds.count(), 0.5f, 0.0f, 1.0f});
+		vk::ClearValue color(std::array<float, 4>{0.1f, 0.1f, 0.1f, 1.0f});
 		commandBuffer->beginRenderPass(vk::RenderPassBeginInfo(renderPass.get(), framebuffers[frame].get(), 
 			vk::Rect2D({0, 0}, win->swapchainExtent), color), vk::SubpassContents::eInline);
+		
+		ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer.get());
+
 		commandBuffer->endRenderPass();
 		commandBuffer->end();
 

@@ -10,6 +10,9 @@ namespace app
 			void preload() override;
 			void prepare(std::vector<vk::Image> swapchainImages, std::vector<vk::ImageView> swapchainViews) override;
 			void render(int frame, vk::Semaphore imageAvailable, vk::Semaphore renderFinished, vk::Fence fence) override;
+		protected:
+			void render_imgui();
+
 		private:
 			vk::UniqueRenderPass renderPass;
 
