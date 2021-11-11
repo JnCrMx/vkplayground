@@ -5,5 +5,6 @@
 
 namespace render
 {
+	vk::UniqueShaderModule createUserShader(vk::Device device, std::string file);
 	vk::UniqueShaderModule createShader(vk::Device device, std::string file);
 }

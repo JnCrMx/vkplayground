@@ -77,3 +77,9 @@ target_sources(imgui PRIVATE
   )
 target_link_libraries(imgui PUBLIC Vulkan::Vulkan glfw)
 target_link_libraries(vkplayground PUBLIC imgui)
+
+add_library(ImGuiFileDialog STATIC external/ImGuiFileDialog/ImGuiFileDialog.cpp)
+target_include_directories(ImGuiFileDialog PUBLIC external/ImGuiFileDialog)
+target_link_libraries(ImGuiFileDialog PUBLIC imgui)
+
+target_link_libraries(vkplayground PUBLIC ImGuiFileDialog)

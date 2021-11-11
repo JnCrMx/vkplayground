@@ -5,9 +5,9 @@
 
 namespace render
 {
-	vk::UniqueShaderModule createShader(vk::Device device, std::string file)
+	vk::UniqueShaderModule createBinaryShader(vk::Device device, std::string file)
 	{
-		std::ifstream in("shaders/"+file+".spv", std::ios_base::binary | std::ios_base::ate);
+		std::ifstream in(file, std::ios_base::binary | std::ios_base::ate);
 
 		size_t size = in.tellg();
 		std::vector<uint32_t> buf(size/sizeof(uint32_t));
@@ -18,5 +18,17 @@ namespace render
 		vk::UniqueShaderModule shader = device.createShaderModuleUnique(shader_info);
 		debugName(device, shader.get(), "Shader Module \""+file+"\"");
 		return std::move(shader);
+	}
+
+	vk::UniqueShaderModule createUserShader(vk::Device device, std::string file)
+	{
+		if(file.ends_with(".spv"))
+			return createBinaryShader(device, file);
+		throw std::runtime_error("unsupported shader format");
+	}
+
+	vk::UniqueShaderModule createShader(vk::Device device, std::string file)
+	{
+		return createBinaryShader(device, "shaders/"+file+".spv");
 	};
 }
