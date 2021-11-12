@@ -3,6 +3,8 @@
 #include "render/phase.hpp"
 #include "app/command.hpp"
 
+#include "FileWatch.hpp"
+
 namespace app
 {
 	class main_phase : public render::phase
@@ -21,7 +23,9 @@ namespace app
 			bool popup_pipeline();
 
 			std::vector<command> commands;
-			std::vector<resource> resources;
+			std::vector<resource*> resources;
+
+			std::vector<filewatch::FileWatch<std::string>> watchers;
 
 		private:
 			vk::UniqueRenderPass renderPass;

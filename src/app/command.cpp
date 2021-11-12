@@ -1,5 +1,7 @@
 #include "app/command.hpp"
 
+#include <algorithm>
+#include <any>
 #include <sstream>
 #include "imgui.h"
 
@@ -10,7 +12,7 @@ namespace app
 		switch(type)
 		{
 			case BindPipeline:
-				args.push_back(INVALID_PIPELINE);
+				args.push_back(&INVALID_PIPELINE);
 				break;
 			case Draw:
 				args.push_back(0u); // vertexCount
@@ -46,7 +48,7 @@ namespace app
 		switch(type)
 		{
 			case BindPipeline:
-				oss << std::any_cast<resource>(args[0]).name;
+				oss << std::any_cast<resource*>(args[0])->name;
 				break;
 			case Draw:
 				oss << std::any_cast<uint32_t>(args[0]) << ", ";
@@ -62,13 +64,15 @@ namespace app
 		return oss.str();
 	}
 
-	void command::execute(vk::CommandBuffer commandBuffer)
+	void command::execute(vk::CommandBuffer commandBuffer, command_context& ctx)
 	{
+		if(!enabled) return;
+
 		switch(type)
 		{
 			case BindPipeline: {
 				commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, 
-					std::any_cast<vk::Pipeline>(std::any_cast<resource>(args[0]).handle));
+					std::any_cast<vk::Pipeline>(std::any_cast<resource*>(args[0])->handle));
 			} break;
 			case Draw: {
 				commandBuffer.draw(
@@ -83,12 +87,14 @@ namespace app
 		}
 	}
 
-	std::optional<std::string> command::simulate(command_state& state)
+	std::optional<std::string> command::simulate(command_state& state, command_context& ctx)
 	{
+		if(!enabled) return std::optional<std::string>();
+
 		switch(type)
 		{
 			case BindPipeline: {
-				if(!std::any_cast<resource>(args[0]).valid)
+				if(!std::any_cast<resource*>(args[0])->valid)
 					return "invalid pipeline";
 				state.pipeline_bound = true;
 			} break;
@@ -109,14 +115,14 @@ namespace app
 		switch(type)
 		{
 			case BindPipeline: {
-				if(ImGui::BeginCombo("Pipeline", std::any_cast<resource>(args[0]).name.c_str()))
+				if(ImGui::BeginCombo("Pipeline", std::any_cast<resource*>(args[0])->name.c_str()))
 				{
 					for(int i=0; i<ctx.resources.size(); i++)
 					{
-						resource& r = ctx.resources[i];
+						resource* r = ctx.resources[i];
 
-						if(r.type == resource::Pipeline)
-							if(ImGui::Selectable(r.name.c_str(), false))
+						if(r->type == resource::Pipeline)
+							if(ImGui::Selectable(r->name.c_str(), false))
 								args[0] = r;
 					}
 					ImGui::EndCombo();

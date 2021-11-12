@@ -34,7 +34,7 @@ namespace app
 
 	struct command_context
 	{
-		std::vector<resource>& resources;
+		std::vector<resource*>& resources;
 	};
 
 	struct command_state
@@ -54,10 +54,11 @@ namespace app
 			command(type type);
 
 			std::string to_string();
-			void execute(vk::CommandBuffer commandBuffer);
-			std::optional<std::string> simulate(command_state& state);
+			void execute(vk::CommandBuffer commandBuffer, command_context& ctx);
+			std::optional<std::string> simulate(command_state& state, command_context& ctx);
 
 			void show_options(command_context& ctx);
+			bool enabled = true;
 		protected:
 			type type;
 			bool fixed;

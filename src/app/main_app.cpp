@@ -1,4 +1,6 @@
 #include "app/main_app.hpp"
+#include "FileWatch.hpp"
+#include "ShaderLang.h"
 #include "render/window.hpp"
 #include "render/utils.hpp"
 
@@ -6,6 +8,10 @@
 #include "ImGuiFileDialog.h"
 #include "backends/imgui_impl_vulkan.h"
 #include "backends/imgui_impl_glfw.h"
+#include <spdlog/spdlog.h>
+#include <thread>
+#include <vulkan/vulkan_enums.hpp>
+#include <vulkan/vulkan_structs.hpp>
 
 namespace app
 {
@@ -15,9 +21,10 @@ namespace app
 
 	main_phase::~main_phase()
 	{
-		for(auto& r : resources)
+		for(auto r : resources)
 		{
-			r.destroy(device);
+			r->destroy(device);
+			delete r;
 		}
 
 		ImGui_ImplGlfw_Shutdown();
@@ -168,10 +175,12 @@ namespace app
 				auto buf = std::make_unique<char[]>( len );
 				snprintf(buf.get(), len, fmt, i, label.c_str());
 
+				if(!command.enabled) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().DisabledAlpha);
 				if(ImGui::Selectable(buf.get(), selected == i))
 					selected = i;
+				if(!command.enabled) ImGui::PopStyleVar();
 
-				auto error = command.simulate(state);
+				auto error = command.simulate(state, ctx);
 				if(error.has_value())
 				{
 					ImGui::SameLine();
@@ -194,6 +203,9 @@ namespace app
 			}
 			else
 			{
+				ImGui::SameLine();
+				ImGui::Checkbox("enable", &commands[selected].enabled);
+
 				commands[selected].show_options(ctx);
 			}
 
@@ -212,13 +224,14 @@ namespace app
 
 	struct pipeline_create_state
 	{
-		std::unique_ptr<char[]> name = std::make_unique<char[]>(256);
 		std::vector<pipeline_create_shader_stage> stages = {};
 
 		vk::PipelineInputAssemblyStateCreateInfo inputAssembly = 
 			vk::PipelineInputAssemblyStateCreateInfo({}, vk::PrimitiveTopology::eTriangleList, false);
 		vk::PipelineRasterizationStateCreateInfo rasterization = 
 			vk::PipelineRasterizationStateCreateInfo({}, false, false, vk::PolygonMode::eFill, {}, vk::FrontFace::eCounterClockwise, false, 0.0f, 0.0f, 0.0f, 1.0f);
+		vk::PipelineDepthStencilStateCreateInfo depthStencil = 
+			vk::PipelineDepthStencilStateCreateInfo({}, false, false, vk::CompareOp::eLessOrEqual, false, false, {}, {}, {}, {});
 	};
 
 	bool main_phase::popup_pipeline()
@@ -228,7 +241,8 @@ namespace app
 		
 		static pipeline_create_state state = {};
 
-		ImGui::InputText("Name", state.name.get(), 256);
+		static std::unique_ptr<char[]> name = std::make_unique<char[]>(256);
+		ImGui::InputText("Name", name.get(), 256);
 
 		/*{
 			ImGui::BeginChild("Flags", ImVec2(0, 50), true);
@@ -264,22 +278,29 @@ namespace app
 						std::copy(main.begin(), main.end(), a.get());
 						return std::move(a);
 					}();
+					static vk::ShaderStageFlagBits stageBit = vk::ShaderStageFlagBits::eVertex;
+
 					ImGui::InputText("Filename", filename.get(), 1024);
 
 					ImGui::SameLine();
 					if(ImGui::Button("select"))
-						ImGuiFileDialog::Instance()->OpenModal("open_shader", "Open File", ".*,.glsl,.vert,.frag,.spv", ".");
+						ImGuiFileDialog::Instance()->OpenModal("open_shader", "Open File", ".*,.glsl,.vert,.frag,.geom,.spv", ".");
 					if(ImGuiFileDialog::Instance()->Display("open_shader"))
 					{
 						if(ImGuiFileDialog::Instance()->IsOk())
 						{
 							auto path = ImGuiFileDialog::Instance()->GetSelection().begin()->second;
 							std::copy(path.begin(), path.end(), filename.get());
+							if(path.ends_with(".vert.spv") || path.ends_with(".vert"))
+								stageBit = vk::ShaderStageFlagBits::eVertex;
+							if(path.ends_with(".geom.spv") || path.ends_with(".geom"))
+								stageBit = vk::ShaderStageFlagBits::eGeometry;
+							if(path.ends_with(".frag.spv") || path.ends_with(".frag"))
+								stageBit = vk::ShaderStageFlagBits::eFragment;
 						}
 						ImGuiFileDialog::Instance()->Close();
 					}
 
-					static vk::ShaderStageFlagBits stageBit = vk::ShaderStageFlagBits::eVertex;
 					if(ImGui::BeginCombo("Stage", vk::to_string(stageBit).c_str()))
 					{
 						for(auto stage : {vk::ShaderStageFlagBits::eVertex, vk::ShaderStageFlagBits::eGeometry, vk::ShaderStageFlagBits::eFragment})
@@ -313,12 +334,12 @@ namespace app
 
 			ImGui::EndChild();
 		}
-		{
+		/*{
 			ImGui::BeginChild("VertexInput", ImVec2(0, 100), true);
 			ImGui::Text("VertexInput");
 
 			ImGui::EndChild();
-		}
+		}*/
 		{
 			ImGui::BeginChild("InputAssembly", ImVec2(0, 100), true);
 			ImGui::Text("InputAssembly");
@@ -376,57 +397,120 @@ namespace app
 
 			ImGui::EndChild();
 		}
+		{
+			ImGui::BeginChild("DepthStencil", ImVec2(0, 100), true);
+			ImGui::Text("DepthStencil");
+
+			ImGui::Checkbox("depthTestEnable", (bool*)&state.depthStencil.depthTestEnable);
+			ImGui::Checkbox("depthWriteEnable", (bool*)&state.depthStencil.depthWriteEnable);
+
+			if(ImGui::BeginCombo("depthCompareOp", vk::to_string(state.depthStencil.depthCompareOp).c_str()))
+			{
+				for(auto op : {vk::CompareOp::eNever, vk::CompareOp::eLess, vk::CompareOp::eEqual, vk::CompareOp::eLessOrEqual, 
+					vk::CompareOp::eGreater, vk::CompareOp::eNotEqual, vk::CompareOp::eGreaterOrEqual, vk::CompareOp::eAlways})
+				{
+					if(ImGui::Selectable(vk::to_string(op).c_str(), op == state.depthStencil.depthCompareOp))
+						state.depthStencil.depthCompareOp = op;
+				}
+				ImGui::EndCombo();
+			}
+
+			ImGui::EndChild();
+		}
 
 		ImGui::EndChild();
+		ImGui::BeginDisabled(std::string(name.get()).empty());
 		if(ImGui::Button("Create"))
 		{
 			std::vector<vk::UniqueShaderModule> shaderModules;
 			std::vector<vk::PipelineShaderStageCreateInfo> shaderInfos;
+			glslang::InitializeProcess();
 			for(const auto& s : state.stages)
 			{
-				shaderModules.push_back(render::createUserShader(device, s.filename));
+				shaderModules.push_back(render::createUserShader(device, s.filename, s.stage));
 				shaderInfos.push_back(vk::PipelineShaderStageCreateInfo({}, s.stage, shaderModules.back().get(), s.entry.c_str()));
 			}
+			glslang::FinalizeProcess();
 
 			vk::PipelineVertexInputStateCreateInfo vertex_input({}, {}, {});
 			vk::PipelineTessellationStateCreateInfo tesselation({}, {});
-
 			vk::Viewport v{};
 			vk::Rect2D s{};
 			vk::PipelineViewportStateCreateInfo viewport({}, v, s);
-
 			vk::PipelineMultisampleStateCreateInfo multisample({}, vk::SampleCountFlagBits::e1);
-			vk::PipelineDepthStencilStateCreateInfo depthStencil({}, false, false);
-
 			vk::PipelineColorBlendAttachmentState attachment(false);
 			attachment.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
 			vk::PipelineColorBlendStateCreateInfo colorBlend({}, false, vk::LogicOp::eClear, attachment);
-
 			std::array<vk::DynamicState, 2> dynamicStates{vk::DynamicState::eViewport, vk::DynamicState::eScissor};
 			vk::PipelineDynamicStateCreateInfo dynamic({}, dynamicStates);
 
 			vk::GraphicsPipelineCreateInfo pipeline_info({}, shaderInfos, &vertex_input, 
-				&state.inputAssembly, &tesselation, &viewport, &state.rasterization, &multisample, &depthStencil, &colorBlend, &dynamic, pipelineLayout.get(), renderPass.get());
+				&state.inputAssembly, &tesselation, &viewport, &state.rasterization, &multisample, &state.depthStencil, &colorBlend, &dynamic, pipelineLayout.get(), renderPass.get());
 			auto [result, pipeline] = device.createGraphicsPipeline(nullptr, pipeline_info);
 			if(result == vk::Result::eSuccess)
 			{
-				resources.emplace_back(resource::type::Pipeline, std::string(state.name.get()), pipeline, true);
+				auto& res = resources.emplace_back(new resource{resource::type::Pipeline, std::string(name.get()), pipeline, true});
+				pipeline_create_state copy = state;
+				auto updater = [this, &res, copy](const std::string& path, const filewatch::Event change_type){
+					spdlog::info("Updating pipeline {} because {} changed", res->name, path);
+					
+					std::vector<vk::UniqueShaderModule> shaderModules;
+					std::vector<vk::PipelineShaderStageCreateInfo> shaderInfos;
+					glslang::InitializeProcess();
+					for(const auto& s : state.stages)
+					{
+						shaderModules.push_back(render::createUserShader(device, s.filename, s.stage));
+						shaderInfos.push_back(vk::PipelineShaderStageCreateInfo({}, s.stage, shaderModules.back().get(), s.entry.c_str()));
+					}
+					glslang::FinalizeProcess();
+
+					vk::PipelineVertexInputStateCreateInfo vertex_input({}, {}, {});
+					vk::PipelineTessellationStateCreateInfo tesselation({}, {});
+					vk::Viewport v{};
+					vk::Rect2D s{};
+					vk::PipelineViewportStateCreateInfo viewport({}, v, s);
+					vk::PipelineMultisampleStateCreateInfo multisample({}, vk::SampleCountFlagBits::e1);
+					vk::PipelineColorBlendAttachmentState attachment(false);
+					attachment.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+					vk::PipelineColorBlendStateCreateInfo colorBlend({}, false, vk::LogicOp::eClear, attachment);
+					std::array<vk::DynamicState, 2> dynamicStates{vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+					vk::PipelineDynamicStateCreateInfo dynamic({}, dynamicStates);
+
+					vk::GraphicsPipelineCreateInfo pipeline_info({}, shaderInfos, &vertex_input, 
+						&copy.inputAssembly, &tesselation, &viewport, &copy.rasterization, &multisample, &copy.depthStencil, &colorBlend, &dynamic, pipelineLayout.get(), renderPass.get());
+					auto [result, pipeline] = device.createGraphicsPipeline(nullptr, pipeline_info);
+					if(result==vk::Result::eSuccess)
+					{
+						vk::Pipeline old = std::any_cast<vk::Pipeline>(res->handle);
+						res->handle = pipeline;
+						(void)std::async([old, this](){
+							std::this_thread::sleep_for(std::chrono::seconds(1));
+							device.destroyPipeline(old);
+						});
+					}
+				};
+				for(int i=0; i<state.stages.size(); i++)
+				{
+					watchers.push_back(filewatch::FileWatch<std::string>(state.stages[i].filename, updater));
+				}
 			}
 			else
 			{
 
 			}
-			
-			state = {};
+			std::fill(name.get(), name.get()+256, '\0');
 			ImGui::CloseCurrentPopup();
-			return false;
 		}
+		ImGui::EndDisabled();
 		ImGui::SameLine();
 		if(ImGui::Button("Cancel"))
 		{
-			state = {};
 			ImGui::CloseCurrentPopup();
-			return false;
+		}
+		ImGui::SameLine();
+		if(ImGui::Button("Clear"))
+		{
+			state = {};
 		}
 		return true;
 	}
@@ -474,12 +558,13 @@ namespace app
 		render_imgui();
 		ImGui::Render();
 
+		command_context ctx = {resources};
 		bool commandsValid = true;
 		{
 			command_state state = {};
 			for(auto& c : commands)
 			{
-				if(c.simulate(state).has_value())
+				if(c.simulate(state, ctx).has_value())
 				{
 					commandsValid = false;
 					break;
@@ -507,7 +592,7 @@ namespace app
 		{
 			for(auto& c : commands)
 			{
-				c.execute(commandBuffer.get());
+				c.execute(commandBuffer.get(), ctx);
 			}
 		}
 		

@@ -41,6 +41,18 @@ target_include_directories(vkplayground PRIVATE ${Vulkan_INCLUDE_DIRS})
 target_include_directories(vkplayground PRIVATE ${GLM_INCLUDE_DIRS})
 target_include_directories(vkplayground PRIVATE external/VulkanMemoryAllocator-Hpp/)
 target_include_directories(vkplayground PRIVATE external/libspng/spng)
+target_include_directories(vkplayground PRIVATE external/filewatch)
+
+set(ENABLE_GLSLANG_BINARIES OFF)
+
+add_subdirectory(external/glslang)
+target_link_libraries(vkplayground PUBLIC glslang)
+target_link_libraries(vkplayground PUBLIC SPIRV)
+target_link_libraries(vkplayground PUBLIC glslang-default-resource-limits)
+
+target_include_directories(vkplayground PUBLIC external/glslang/glslang/Public)
+target_include_directories(vkplayground PUBLIC external/glslang/SPIRV)
+target_include_directories(vkplayground PUBLIC external/glslang/StandAlone)
 
 find_program(GLSLC glslc)
 find_program(GLSLang_Validator glslangValidator)

@@ -14,3 +14,9 @@
 	path = external/ImGuiFileDialog
 	url = https://github.com/aiekick/ImGuiFileDialog
 	branch = Lib_Only
+[submodule "external/filewatch"]
+	path = external/filewatch
+	url = https://github.com/ThomasMonkman/filewatch
+[submodule "external/glslang"]
+	path = external/glslang
+	url = https://github.com/KhronosGroup/glslang
