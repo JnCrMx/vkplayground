@@ -3,6 +3,7 @@
 #include "ShaderLang.h"
 #include "render/window.hpp"
 #include "render/utils.hpp"
+#include "render/model.hpp"
 
 #include "imgui.h"
 #include "ImGuiFileDialog.h"
@@ -284,7 +285,7 @@ namespace app
 
 					ImGui::SameLine();
 					if(ImGui::Button("select"))
-						ImGuiFileDialog::Instance()->OpenModal("open_shader", "Open File", ".*,.glsl,.vert,.frag,.geom,.spv", ".");
+						ImGuiFileDialog::Instance()->OpenModal("open_shader", "Open Shader", ".*,.glsl,.vert,.frag,.geom,.spv", ".");
 					if(ImGuiFileDialog::Instance()->Display("open_shader"))
 					{
 						if(ImGuiFileDialog::Instance()->IsOk())
@@ -520,25 +521,89 @@ namespace app
 		ImGui::Begin("Resources", nullptr, ImGuiWindowFlags_MenuBar);
 
 		bool pipeline_popup = false;
+		bool model_file_popup = false;
+		bool model_grid_popup = false;
 		if(ImGui::BeginMenuBar())
 		{
 			if(ImGui::BeginMenu("Add"))
 			{
 				if(ImGui::MenuItem("Pipeline"))
 					pipeline_popup = true;
+				if(ImGui::BeginMenu("Model"))
+				{
+					if(ImGui::MenuItem("OBJ"))
+						model_file_popup = true;
+					if(ImGui::MenuItem("Grid"))
+						model_grid_popup = true;
+					ImGui::EndMenu();
+				}
 				ImGui::EndMenu();
 			}
 			ImGui::EndMenuBar();
 		}
 
+		static int selected = 0;
+
+		ImGui::BeginDisabled(selected >= resources.size() || resources[selected]->fake);
+		if(ImGui::Button("delete"))
+		{
+			auto& r = resources[selected];
+			r->valid = false;
+			for(auto c : r->childs)
+			{
+				c->valid = false;
+			}
+			(void)std::async([this, r](){
+				std::this_thread::sleep_for(std::chrono::seconds(1));
+				r->destroy(device);
+			});
+		}
+		ImGui::EndDisabled();
+
+		if(ImGui::BeginChild("resource list"))
+		{
+			for(int i=0; i<resources.size(); i++)
+			{
+				auto& r = resources[i];
+				if(r->valid)
+				{
+					std::string text = r->name;
+					if(ImGui::Selectable(text.c_str(), selected == i))
+						selected = i;
+				}
+			}
+		}
+		ImGui::EndChild();
+
 		if(pipeline_popup)
 			ImGui::OpenPopup("pipeline_popup");
+		if(model_file_popup)
+			ImGuiFileDialog::Instance()->OpenModal("model_file_popup", "Open model", ".obj,.*", ".");
 
 		ImGui::SetNextWindowSize(ImVec2(500, 750));
 		if(ImGui::BeginPopup("pipeline_popup", ImGuiWindowFlags_Modal))
 		{
 			pipeline_popup = popup_pipeline();
 			ImGui::EndPopup();
+		}
+		if(ImGuiFileDialog::Instance()->Display("model_file_popup"))
+		{
+			if(ImGuiFileDialog::Instance()->IsOk())
+			{
+				auto path = ImGuiFileDialog::Instance()->GetSelection().begin()->second;
+				auto name = ImGuiFileDialog::Instance()->GetCurrentFileName();
+
+				std::shared_ptr<render::model> model = std::make_shared<render::model>(device, allocator);
+				loader->loadModel(model.get(), path).wait();
+
+				vk::Buffer vertexBuffer = model->vertexBuffer;
+				vk::Buffer indexBuffer = model->indexBuffer;
+				auto v = resources.emplace_back(new resource{resource::type::Buffer, name+"-vertex", vertexBuffer, true, true});
+				auto i = resources.emplace_back(new resource{resource::type::Buffer, name+"-index", indexBuffer, true, true});
+				resources.push_back(new resource{resource::type::Model, name, std::move(model), true, false, {v, i}});
+
+			}
+			ImGuiFileDialog::Instance()->Close();
 		}
 
 		ImGui::End();

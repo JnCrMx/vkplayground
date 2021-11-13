@@ -1,5 +1,8 @@
 #pragma once
 
+#include "render/model.hpp"
+#include "render/texture.hpp"
+
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
 
@@ -13,19 +16,33 @@ namespace app
 	{
 		enum type
 		{
-			Pipeline
+			Pipeline,
+			Model,
+
+			Buffer
 		};
 		type type;
 		std::string name;
 		std::any handle;
-		bool valid;
+		bool valid = true;
+		bool fake = false;
+		std::vector<resource*> childs = {};
 
 		void destroy(vk::Device device)
 		{
+			if(fake)
+				return;
+
 			switch(type)
 			{
 				case Pipeline:
 					device.destroyPipeline(std::any_cast<vk::Pipeline>(handle));
+					break;
+				case Model:
+					std::any_cast<std::shared_ptr<render::model>>(handle).reset();
+					break;
+				case Buffer:
+					//TODO: destroy
 					break;
 			}
 		}

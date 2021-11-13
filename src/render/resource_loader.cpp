@@ -73,7 +73,7 @@ namespace render
 	// Ugly hack to get PNG size BEFORE loading it, so we can create a vk::Image and a vk::ImageView in advance
 	vk::Extent2D resource_loader::getImageSize(std::string filename)
 	{
-		std::ifstream in("assets/textures/"+filename, std::ios_base::binary);
+		std::ifstream in(filename, std::ios_base::binary);
 
 		// 32 bytes is enough to capture the IHDR chunk (it's guaranteed to be the first chunk) which is all we need
 		std::vector<char> data(32);
@@ -98,7 +98,7 @@ namespace render
 		texture* tex = std::get<texture*>(task.dst);
 		if(std::holds_alternative<std::string>(task.src))
 		{
-			std::ifstream in("assets/textures/"+std::get<std::string>(task.src), std::ios_base::ate | std::ios_base::binary);
+			std::ifstream in(std::get<std::string>(task.src), std::ios_base::ate | std::ios_base::binary);
 			size_t size = in.tellg();
 			std::vector<char> data(size);
 			in.seekg(0);
@@ -165,7 +165,7 @@ namespace render
 		vk::CommandBuffer commandBuffer, 
 		size_t stagingSize, vk::Buffer stagingBuffer)
 	{
-		std::ifstream obj("assets/models/"+std::get<std::string>(task.src));
+		std::ifstream obj(std::get<std::string>(task.src));
 		std::vector<vertex_data> vertices;
 		std::vector<uint32_t> indices;
 		load_obj(obj, vertices, indices);
